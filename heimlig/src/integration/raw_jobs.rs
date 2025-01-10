@@ -456,7 +456,7 @@ impl RequestResponseRawPair {
     ///
     pub unsafe fn from_raw(ptr: *const u8) -> Result<Self, ValidationError> {
         let request = RequestRaw::from_raw(ptr)?;
-        let response_ptr = ptr.add(core::mem::size_of::<RequestRaw>());
+        let response_ptr = ptr.add(size_of::<RequestRaw>());
         let response = ResponseRaw::from_raw(response_ptr)?;
         Ok(RequestResponseRawPair { request, response })
     }
@@ -2124,20 +2124,20 @@ mod test {
     use super::*;
     use crate::common::jobs::Request::GetRandom;
     use crate::common::jobs::{ClientId, RequestId};
-    use core::{mem, ptr};
 
     #[test]
     fn test_serialize_deserialize() {
         let client_id = ClientId(5);
         let request_id = RequestId(7);
-        let mut shared_memory = [0u8; 16];
+        let mut output_buffer = [0u8; 16];
         let request = GetRandom {
             client_id,
             request_id,
-            output: &mut shared_memory,
+            output: &mut output_buffer,
         };
         let request_raw: RequestRaw = request.into();
         let request_raw_ptr = &request_raw as *const RequestRaw as *const u8;
+        // SAFETY: RequestRaw is reconstructed from instance on the stack created just now
         let reconstructed_request_raw = unsafe { RequestRaw::from_raw(request_raw_ptr) }
             .expect("failed to create raw request from pointer.");
         let always_valid = |_data: *const u8, _size: u32| true;
@@ -2152,8 +2152,8 @@ mod test {
             } => {
                 assert_eq!(reconstructed_client_id, client_id);
                 assert_eq!(reconstructed_request_id, request_id);
-                assert_eq!(reconstructed_output.as_ptr(), shared_memory.as_ptr());
-                assert_eq!(reconstructed_output.len(), shared_memory.len());
+                assert_eq!(reconstructed_output.as_ptr(), output_buffer.as_ptr());
+                assert_eq!(reconstructed_output.len(), output_buffer.len());
             }
             _ => {
                 panic!("Unexpected reconstructed request type")
@@ -2166,24 +2166,33 @@ mod test {
         let client_id = ClientId(5);
         let request_id = RequestId(7);
         const OUTPUT_SIZE: usize = 16;
-        let mut shared_memory = [0u8; mem::size_of::<RequestRaw>() + OUTPUT_SIZE];
+        let mut shared_memory = [0u8; size_of::<RequestResponseRawPair>() + OUTPUT_SIZE];
         let request_response_start = shared_memory.as_mut_ptr();
-        let output_start = unsafe { shared_memory.as_mut_ptr().add(mem::size_of::<RequestRaw>()) };
+        // SAFETY: Raw data format in shared memory: RequestResponseRawPair || output
+        let output_start = unsafe {
+            shared_memory
+                .as_mut_ptr()
+                .add(size_of::<RequestResponseRawPair>())
+        };
         let request = GetRandom {
             client_id,
             request_id,
+            // SAFETY: Raw data format in shared memory: RequestResponseRawPair || output
             output: unsafe { slice::from_raw_parts_mut(output_start, OUTPUT_SIZE) },
         };
         let request_raw = request.into();
         let mut request_response_pair =
+            // SAFETY: Raw data format in shared memory: RequestResponseRawPair || output
             unsafe { RequestResponseRawPair::from_raw(request_response_start) }
                 .expect("failed to create request-response pair from pointer.");
         request_response_pair.request = request_raw;
 
         let is_in_shared_memory_1st_half = |data: *const u8, size: u32| {
             let start_data = data;
+            // SAFETY: Raw pointer is trusted in unit tests
             let end_data = unsafe { start_data.add(size as usize) };
             let start_shared_memory = shared_memory.as_ptr();
+            // SAFETY: Calculation to determine first half of raw memory region
             let end_shared_memory_1st_half =
                 unsafe { start_shared_memory.add(shared_memory.len() / 2) };
             start_shared_memory <= start_data && end_data <= end_shared_memory_1st_half
@@ -2209,24 +2218,34 @@ mod test {
         let client_id = ClientId(5);
         let request_id = RequestId(7);
         const OUTPUT_SIZE: usize = 16;
-        let mut shared_memory = [0u8; mem::size_of::<RequestRaw>() + OUTPUT_SIZE];
+        let mut shared_memory = [0u8; size_of::<RequestResponseRawPair>() + OUTPUT_SIZE];
         let request_response_start = shared_memory.as_mut_ptr();
-        let output_start = unsafe { shared_memory.as_mut_ptr().add(mem::size_of::<RequestRaw>()) };
+        // SAFETY: Raw data format in shared memory: RequestResponseRawPair || output
+        let output_start = unsafe {
+            shared_memory
+                .as_mut_ptr()
+                .add(size_of::<RequestResponseRawPair>())
+        };
         let request = GetRandom {
             client_id,
             request_id,
+            // SAFETY: Raw data format in shared memory: RequestResponseRawPair || output
             output: unsafe { slice::from_raw_parts_mut(output_start, OUTPUT_SIZE) },
         };
-        let request_raw = request.into();
+        let request_raw: RequestRaw = request.into();
 
         // Invalidate enum tag of raw request
+        // SAFETY: Populating RequestRaw member of RequestResponseRawPair and modifying its tag
         unsafe {
-            ptr::copy(&request_raw, request_response_start as *mut RequestRaw, 1);
-            let tag: *mut u8 = request_response_start.add(offset_of!(RequestRaw, data));
+            let pair_request_raw: *mut u8 =
+                request_response_start.add(offset_of!(RequestResponseRawPair, request));
+            *(pair_request_raw as *mut RequestRaw) = request_raw;
+            let tag: *mut u8 = pair_request_raw.add(offset_of!(RequestRaw, data));
             const INVALID_TAG: u8 = 0xFF;
             *tag = INVALID_TAG;
         }
 
+        // SAFETY: Testing errors in conversion from raw memory to RequestResponseRawPair
         match unsafe { RequestResponseRawPair::from_raw(request_response_start) } {
             Ok(_) => {
                 panic!("Expected request raw reconstruction to fail")

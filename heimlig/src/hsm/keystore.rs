@@ -1,9 +1,5 @@
 use displaydoc::Display;
 
-/// Identifier to reference HSM keys
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
-pub struct KeyId(pub u32);
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Display)]
 pub enum Error {
     /// The operation is not permitted
@@ -23,6 +19,10 @@ pub enum Error {
     /// The size of the provided buffer is invalid.
     InvalidBufferSize,
 }
+
+/// Identifier to reference HSM keys
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
+pub struct KeyId(pub u32);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Curve {
@@ -143,13 +143,20 @@ pub trait InsecureKeyStore {
     /// allow it. It is supposed to be used by workers and is not reachable from outside Heimlig.
     /// Workers operate inside Heimlig and are trusted.
     ///
-    /// returns: The number of bytes written to `dest` or and error.
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_symmetric_key_insecure<'data>(
         &self,
         id: KeyId,
         dest: &'data mut [u8],
     ) -> Result<&'data [u8], Error>;
 
+    /// Read an asymmetric public key from storage.
+    ///
+    /// Unlike `export_public_key()`, this function exports keys even if their permissions do not
+    /// allow it. It is supposed to be used by workers and is not reachable from outside Heimlig.
+    /// Workers operate inside Heimlig and are trusted.
+    ///
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_public_key_insecure<'data>(
         &self,
         id: KeyId,
@@ -162,7 +169,7 @@ pub trait InsecureKeyStore {
     /// allow it. It is supposed to be used by workers and is not reachable from outside Heimlig.
     /// Workers operate inside Heimlig and are trusted.
     ///
-    /// returns: The number of bytes written to `dest` or and error.
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_private_key_insecure<'data>(
         &self,
         id: KeyId,
@@ -182,6 +189,7 @@ pub trait InsecureKeyStore {
 }
 
 pub trait KeyStore {
+    /// Returns the key infos for a given key identifier.
     fn get_key_info(&self, id: KeyId) -> Result<KeyInfo, Error>;
 
     /// Write a symmetric key to storage.
@@ -203,7 +211,7 @@ pub trait KeyStore {
 
     /// Read a symmetric key from storage.
     ///
-    /// returns: The number of bytes written to `dest` or and error.
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_symmetric_key<'data>(
         &self,
         id: KeyId,
@@ -212,7 +220,7 @@ pub trait KeyStore {
 
     /// Read an asymmetric public key from storage.
     ///
-    /// returns: The number of bytes written to `dest` or and error.
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_public_key<'data>(
         &self,
         id: KeyId,
@@ -221,7 +229,7 @@ pub trait KeyStore {
 
     /// Read an asymmetric private key from storage.
     ///
-    /// returns: The number of bytes written to `dest` or and error.
+    /// returns: A slice of the bytes written to `dest` or an error.
     fn export_private_key<'data>(
         &self,
         id: KeyId,
